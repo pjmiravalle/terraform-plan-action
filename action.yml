@@ -1,0 +1,63 @@
+name: 'Terraform Plan'
+description: 'Runs a Terraform Plan'
+inputs:
+  tf_state_bucket:
+    description: 'Terraform State S3 Bucket'
+    required: true
+  tf_state_file:
+    description: 'Terraform State File'
+    required: true
+  aws_default_region:
+    description: 'AWS Default Region'
+    required: true
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  tf_in_automation: true
+
+runs:
+  using: "composite"
+  steps:
+  - name: Terraform Format
+    id: format
+    run: terraform fmt -check
+
+  - name: Terraform Init
+    id: init
+    run: |
+      terraform init -no-color \
+      -backend=true \
+      -backend-config="bucket=${{ inputs.tf_state_bucket }}" \
+      -backend-config="key=${{ inputs.tf_state_file }}" \
+      -backend-config="region=${{ inputs.aws_default_region }}"
+
+  - name: Terraform Validate
+    id: validate
+    run: terraform validate
+
+  - name: Terraform Plan
+    id: plan
+    run: terraform plan -no-color
+    # continue-on-error: true
+
+  - name: Update Pull Request
+    uses: actions/github-script@0.9.0
+    with:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      script: |
+        const output = `#### Terraform Format and Style 🖌\`${{ steps.format.outcome }}\`
+        #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+        #### Terraform Validate ⚙️\`${{ steps.validate.outcome }}\`
+        #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+        <details><summary>Show Plan</summary>\n
+        \`\`\`terraform\n${{ steps.plan.outputs.stdout }}\n\`\`\`
+        </details>
+        *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+        github.issues.createComment({
+          issue_number: context.issue.number,
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          body: output
+        })
